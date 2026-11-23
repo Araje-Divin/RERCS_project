@@ -3,30 +3,79 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 
-const createToken = (user) =>
-  jwt.sign(
+const createToken = (user) => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured');
+  }
+
+  return jwt.sign(
     { id: user.id, role: user.role, name: user.name },
     process.env.JWT_SECRET,
     { expiresIn: '1d' }
   );
+};
+
+const isValidEmail = (email) =>
+  email.length <= 150 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const isValidLoginIdentifier = (identifier) =>
+  isValidEmail(identifier) ||
+  (identifier.length <= 150 && /^[^\s@]+@[^\s@]+$/.test(identifier));
 
 // POST /api/auth/register
 exports.register = async (req, res) => {
   try {
-    const { name, email, phone, address, password } = req.body;
+    const { name, email, phone, address, password } = req.body || {};
 
-    if (!name || !email || !password) {
+    if (
+      typeof name !== 'string' ||
+      typeof email !== 'string' ||
+      typeof password !== 'string' ||
+      !name.trim() ||
+      !email.trim() ||
+      !password
+    ) {
       return res
         .status(400)
         .json({ message: 'Name, email and password are required' });
     }
-    if (password.length < 6) {
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (cleanName.length > 100) {
       return res
         .status(400)
-        .json({ message: 'Password must be at least 6 characters' });
+        .json({ message: 'Name must be 100 characters or fewer' });
+    }
+    if (!isValidEmail(cleanEmail)) {
+      return res
+        .status(400)
+        .json({ message: 'Please provide a valid email address' });
+    }
+    if (password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
+      return res
+        .status(400)
+        .json({ message: 'Password must be 6-72 bytes long' });
+    }
+    if (
+      (phone != null && typeof phone !== 'string') ||
+      (address != null && typeof address !== 'string')
+    ) {
+      return res.status(400).json({ message: 'Phone and address must be text' });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone?.trim() || null;
+    const cleanAddress = address?.trim() || null;
+    if (cleanPhone && cleanPhone.length > 20) {
+      return res
+        .status(400)
+        .json({ message: 'Phone must be 20 characters or fewer' });
+    }
+    if (cleanAddress && cleanAddress.length > 255) {
+      return res
+        .status(400)
+        .json({ message: 'Address must be 255 characters or fewer' });
+    }
 
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [
       cleanEmail,
@@ -41,7 +90,7 @@ exports.register = async (req, res) => {
       `INSERT INTO users (name, email, phone, address, password_hash, role)
        VALUES ($1, $2, $3, $4, $5, 'citizen')
        RETURNING id, name, email, role`,
-      [name, cleanEmail, phone || null, address || null, passwordHash]
+      [cleanName, cleanEmail, cleanPhone, cleanAddress, passwordHash]
     );
 
     const user = result.rows[0];
@@ -51,6 +100,9 @@ exports.register = async (req, res) => {
       user,
     });
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ message: 'Email is already registered' });
+    }
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
@@ -59,15 +111,30 @@ exports.register = async (req, res) => {
 // POST /api/auth/login
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
 
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required' });
+    if (
+      typeof email !== 'string' ||
+      typeof password !== 'string' ||
+      !email.trim() ||
+      !password
+    ) {
+      return res
+        .status(400)
+        .json({ message: 'Email and password are required' });
     }
 
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [
-      email.trim().toLowerCase(),
-    ]);
+    const cleanEmail = email.trim().toLowerCase();
+    if (!isValidLoginIdentifier(cleanEmail)) {
+      return res
+        .status(400)
+        .json({ message: 'Please provide a valid email address' });
+    }
+
+    const result = await pool.query(
+      'SELECT id, name, email, role, password_hash FROM users WHERE email = $1',
+      [cleanEmail]
+    );
     const user = result.rows[0];
 
     // Same message for both cases, so attackers cannot learn which emails exist
