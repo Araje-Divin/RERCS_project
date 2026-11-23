@@ -11,8 +11,10 @@ import MyIncidents from './pages/MyIncidents';
 import DispatcherDashboard from './pages/DispatcherDashboard';
 import ResponderDashboard from './pages/ResponderDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import { useLanguage } from './context/LanguageContext';
 
 function App() {
+  const { t } = useLanguage();
   return (
     <>
       <Navbar />
@@ -78,7 +80,7 @@ function App() {
           }
         />
 
-        <Route path="*" element={<h2 className="container">Page not found</h2>} />
+        <Route path="*" element={<h2 className="container">{t('pageNotFound')}</h2>} />
       </Routes>
     </>
   );
