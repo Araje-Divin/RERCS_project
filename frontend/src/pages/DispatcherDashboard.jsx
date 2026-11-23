@@ -15,25 +15,31 @@ const FILTERS = [
   'Rejected',
 ];
 
-// Which responder types fit each emergency type
-const SUGGESTED = {
+// Which responder types can handle each emergency type
+const RESPONDER_TYPES_BY_INCIDENT = {
   Fire: ['fire'],
   Medical: ['medical'],
   Crime: ['police'],
   Accident: ['police', 'medical'],
+  'Natural Disaster': ['police', 'medical', 'fire'],
+  Other: ['police', 'medical', 'fire', 'other'],
 };
 
 // One incident shown as a card with the buttons the dispatcher needs
 function DispatcherCard({ incident, responders, onAction }) {
   const [responderId, setResponderId] = useState('');
 
-  const suggested = SUGGESTED[incident.type] || [];
+  const eligibleTypes = RESPONDER_TYPES_BY_INCIDENT[incident.type] || [];
 
-  // Put the suggested responder types first in the list
-  const sortedResponders = [...responders].sort(
-    (a, b) =>
-      Number(suggested.includes(b.responder_type)) -
-      Number(suggested.includes(a.responder_type))
+  const compatibleResponders = responders.filter(
+    (responder) => eligibleTypes.includes(responder.responder_type)
+  );
+  const availableResponders = compatibleResponders.filter(
+    (responder) => responder.status === 'available'
+  );
+
+  const sortedResponders = [...availableResponders].sort((a, b) =>
+    a.name.localeCompare(b.name)
   );
 
   return (
@@ -104,8 +110,14 @@ function DispatcherCard({ incident, responders, onAction }) {
 
         {incident.status === 'Verified' && (
           <>
-            {responders.length === 0 ? (
-              <span className="muted">No responder is available right now.</span>
+            {availableResponders.length === 0 ? (
+              <span className="muted">
+                {responders.length === 0
+                  ? 'No responders are registered. Ask an admin to create one in Admin Dashboard > Create user.'
+                  : compatibleResponders.length === 0
+                    ? `No responder for ${incident.type} incidents is registered. Ask an admin to create a ${eligibleTypes.map((type) => type === 'other' ? 'Other' : type).join(' or ')} responder.`
+                  : 'No responder is available right now.'}
+              </span>
             ) : (
               <>
                 <select
@@ -115,7 +127,6 @@ function DispatcherCard({ incident, responders, onAction }) {
                   <option value="">-- Choose a responder --</option>
                   {sortedResponders.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {suggested.includes(r.responder_type) ? '⭐ ' : ''}
                       {r.name} – {r.responder_type}
                       {r.unit ? `, ${r.unit}` : ''}
                     </option>
@@ -169,7 +180,7 @@ function DispatcherDashboard() {
       const params = filter === 'All' ? {} : { status: filter };
       const [incidentsResponse, respondersResponse] = await Promise.all([
         api.get('/incidents', { params }),
-        api.get('/users/responders', { params: { status: 'available' } }),
+        api.get('/users/responders'),
       ]);
       setIncidents(incidentsResponse.data);
       setResponders(respondersResponse.data);

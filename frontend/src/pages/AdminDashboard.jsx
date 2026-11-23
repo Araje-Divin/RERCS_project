@@ -268,13 +268,18 @@ function CreateUserTab() {
               <option value="police">Police</option>
               <option value="medical">Medical</option>
               <option value="fire">Fire</option>
+              <option value="other">Other</option>
             </select>
 
             <label>Unit (example: Kigali Police Unit 2)</label>
             <input name="unit" value={form.unit} onChange={handleChange} />
 
-            <label>{extraLabel}</label>
-            <input name="extra" value={form.extra} onChange={handleChange} />
+            {extraLabel && (
+              <>
+                <label>{extraLabel}</label>
+                <input name="extra" value={form.extra} onChange={handleChange} />
+              </>
+            )}
           </>
         )}
 
