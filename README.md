@@ -1,3 +1,4 @@
+
 # Rwanda Emergency Response Coordinating System (RERCS)
 
 **Student Name:** Araje Divin
@@ -5,7 +6,7 @@
 
 RERCS is a full-stack web application designed to help citizens report emergencies and support dispatchers and emergency responders in Rwanda to coordinate and track incident responses efficiently.
 
----
+
 
 ## 1. Introduction
 
@@ -18,7 +19,7 @@ The Rwanda Emergency Response Coordinating System (RERCS) is a centralized digit
 
 RERCS provides role-based dashboards, incident status tracking, responder assignment, notification messages and a complete history of incident updates.
 
----
+
 
 ## 2. Objective of the Project
 
@@ -32,7 +33,7 @@ The main objectives of RERCS are:
 - To improve communication between citizens, dispatchers and responders.
 - To provide administrators with tools for managing users and responders.
 
----
+
 
 ## 3. Problem and Solution
 
@@ -165,7 +166,7 @@ The administrator can create users for dispatcher and responder roles and assign
 
 ![Administrator creating a user](img/create-users.png)
 
----
+
 
 ## 5. Who Uses This Project
 
@@ -387,7 +388,7 @@ npm.cmd run build --prefix frontend
 # Or, if the terminal is already inside the frontend directory:
 cd frontend
 npm.cmd run build
-```
+
 
 Run frontend lint checks:
 
@@ -398,7 +399,7 @@ npm.cmd run lint --prefix frontend
 # Or, if the terminal is already inside the frontend directory:
 cd frontend
 npm.cmd run lint
-```
+
 
 ![RERCS frontend build and lint testing](img/frontend-testing.png)
 
@@ -406,7 +407,7 @@ The frontend production build completes successfully. Frontend linting also runs
 
 Additional testing information is available in [docs/TESTING.md](docs/TESTING.md).
 
----
+
 
 ## 7. Conclusion
 
@@ -415,3 +416,7 @@ RERCS provides a practical digital solution for improving emergency incident rep
 By dividing responsibilities among citizens, dispatchers, responders and administrators, RERCS makes each role clear and helps all authorized users follow the current status of an incident. The system demonstrates how React, Node.js, Express and PostgreSQL can be combined to build a secure, role-based and maintainable emergency response platform.
 
 Future development may include real-time maps, SMS and email alerts, mobile applications, public alert areas, official reports and exports, audit logging and automatic backups.
+
+# RERCS_project
+Rwanda Emergency Response Coordination System 
+
