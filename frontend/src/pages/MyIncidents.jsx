@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import StatusBadge from '../components/StatusBadge';
+import { useLanguage } from '../context/LanguageContext';
 
 // One incident shown as a card
 function IncidentCard({ incident }) {
+  const { t } = useLanguage();
   const [history, setHistory] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -19,7 +21,7 @@ function IncidentCard({ incident }) {
     try {
       const response = await api.get(`/incidents/${incident.id}/history`);
       setHistory(response.data);
-    } catch (err) {
+    } catch {
       setHistory([]);
     }
     setLoadingHistory(false);
@@ -52,7 +54,7 @@ function IncidentCard({ incident }) {
       )}
 
       <button className="btn btn-primary" onClick={toggleHistory}>
-        {loadingHistory ? 'Loading...' : history ? 'Hide history' : 'Show history'}
+        {loadingHistory ? t('loading') : history ? t('hideHistory') : t('showHistory')}
       </button>
 
       {history && (
@@ -70,6 +72,7 @@ function IncidentCard({ incident }) {
 }
 
 function MyIncidents() {
+  const { t } = useLanguage();
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -81,7 +84,7 @@ function MyIncidents() {
         setIncidents(response.data);
         setError('');
       } catch (err) {
-        setError(err.response?.data?.message || 'Cannot reach the server');
+        setError(err.response?.data?.message || t('cannotReach'));
       }
       setLoading(false);
     };
@@ -90,20 +93,20 @@ function MyIncidents() {
     // Refresh the list every 10 seconds to see new status updates
     const timer = setInterval(loadIncidents, 10000);
     return () => clearInterval(timer);
-  }, []);
+  }, [t]);
 
   return (
     <div className="container">
-      <h2>My incidents</h2>
+      <h2>{t('myIncidents')}</h2>
 
-      {loading && <p>Loading...</p>}
+      {loading && <p>{t('loading')}</p>}
       {error && <p className="error">{error}</p>}
 
       {!loading && !error && incidents.length === 0 && (
         <div className="card">
-          <p>You have not reported any emergency yet.</p>
+          <p>{t('noIncidents')}</p>
           <Link to="/report">
-            <button className="btn btn-danger">🚨 Report an emergency</button>
+            <button className="btn btn-danger">🚨 {t('reportEmergency')}</button>
           </Link>
         </div>
       )}

@@ -2,11 +2,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useLanguage } from '../context/LanguageContext';
 
 const TYPES = ['Fire', 'Medical', 'Accident', 'Crime', 'Natural Disaster', 'Other'];
 
 function ReportEmergency() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const [form, setForm] = useState({
     type: 'Fire',
     location: '',
@@ -24,19 +26,19 @@ function ReportEmergency() {
   // Asks the browser for the phone/computer GPS position
   const getMyLocation = () => {
     if (!navigator.geolocation) {
-      setGpsMessage('Your browser does not support GPS');
+      setGpsMessage(t('gpsUnsupported'));
       return;
     }
-    setGpsMessage('Getting your location...');
+    setGpsMessage(t('gettingLocation'));
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setCoords({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
-        setGpsMessage('✅ GPS location captured');
+        setGpsMessage(`✅ ${t('gpsCaptured')}`);
       },
-      () => setGpsMessage('❌ Could not get your location. Please type it below.')
+      () => setGpsMessage(`❌ ${t('gpsFailed')}`)
     );
   };
 
@@ -52,7 +54,7 @@ function ReportEmergency() {
       });
       navigate('/my-incidents'); // show the list after sending
     } catch (err) {
-      setError(err.response?.data?.message || 'Cannot reach the server');
+      setError(err.response?.data?.message || t('cannotReach'));
       setLoading(false);
     }
   };
@@ -60,10 +62,10 @@ function ReportEmergency() {
   return (
     <div className="container" style={{ maxWidth: 560 }}>
       <div className="card">
-        <h2>🚨 Report an emergency</h2>
+        <h2>🚨 {t('reportEmergency')}</h2>
 
         <form onSubmit={handleSubmit}>
-          <label>Type of emergency</label>
+          <label>{t('emergencyType')}</label>
           <select name="type" value={form.type} onChange={handleChange}>
             {TYPES.map((t) => (
               <option key={t} value={t}>
@@ -72,7 +74,7 @@ function ReportEmergency() {
             ))}
           </select>
 
-          <label>Location (village, street, landmark)</label>
+          <label>{t('location')}</label>
           <input
             name="location"
             value={form.location}
@@ -82,11 +84,11 @@ function ReportEmergency() {
           />
 
           <button type="button" className="btn btn-primary" onClick={getMyLocation}>
-            📍 Use my GPS location
+            📍 {t('useGps')}
           </button>
           {gpsMessage && <p className="muted">{gpsMessage}</p>}
 
-          <label>Describe what is happening</label>
+          <label>{t('describe')}</label>
           <textarea
             name="description"
             rows="4"
@@ -99,7 +101,7 @@ function ReportEmergency() {
           {error && <p className="error">{error}</p>}
 
           <button className="btn btn-danger" type="submit" disabled={loading}>
-            {loading ? 'Sending...' : 'Send emergency report'}
+            {loading ? t('sending') : t('sendReport')}
           </button>
         </form>
       </div>
