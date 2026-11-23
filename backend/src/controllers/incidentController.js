@@ -10,6 +10,51 @@ const ALLOWED_TRANSITIONS = {
   'In Progress': ['Pending', 'Completed'],
   Pending: ['In Progress'],
 };
+const INCIDENT_TYPES = [
+  'Fire',
+  'Medical',
+  'Accident',
+  'Crime',
+  'Natural Disaster',
+  'Other',
+];
+const INCIDENT_STATUSES = [
+  'Reported',
+  'Verified',
+  'Rejected',
+  'Assigned',
+  'In Progress',
+  'Pending',
+  'Completed',
+  'Closed',
+];
+const RESPONDER_TYPES_BY_INCIDENT = {
+  Fire: ['fire'],
+  Medical: ['medical'],
+  Crime: ['police'],
+  Accident: ['police', 'medical'],
+  'Natural Disaster': ['police', 'medical', 'fire'],
+  Other: ['police', 'medical', 'fire', 'other'],
+};
+
+const isOptionalText = (value, maxLength) =>
+  value == null ||
+  (typeof value === 'string' && value.trim().length <= maxLength);
+
+const isCoordinate = (value, min, max) =>
+  value == null ||
+  (typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= min &&
+    value <= max);
+
+const rollback = async (client) => {
+  try {
+    await client.query('ROLLBACK');
+  } catch (err) {
+    console.error('Could not roll back transaction:', err);
+  }
+};
 
 // Reusable query: an incident plus citizen and responder names
 const BASE_QUERY = `
@@ -33,6 +78,22 @@ const logUpdate = (db, incidentId, status, note, userId) =>
     [incidentId, status, note, userId]
   );
 
+const createNotification = (db, userId, incidentId, type, message) =>
+  db.query(
+    `INSERT INTO notifications (user_id, incident_id, type, message)
+     VALUES ($1, $2, $3, $4)`,
+    [userId, incidentId, type, message]
+  );
+
+const notifyDispatchers = async (db, incident, type, message) => {
+  const dispatchers = await db.query(
+    "SELECT id FROM users WHERE role = 'dispatcher'"
+  );
+  for (const dispatcher of dispatchers.rows) {
+    await createNotification(db, dispatcher.id, incident.id, type, message);
+  }
+};
+
 // Is this user allowed to look at this incident?
 const canView = (user, incident) => {
   if (user.role === 'citizen') return incident.citizen_id === user.id;
@@ -42,29 +103,80 @@ const canView = (user, incident) => {
 
 // POST /api/incidents  (citizen)
 exports.createIncident = async (req, res) => {
+  const { type, location, latitude, longitude, description } = req.body || {};
+
+  if (!INCIDENT_TYPES.includes(type)) {
+    return res
+      .status(400)
+      .json({ message: 'Please provide a valid incident type' });
+  }
+  if (
+    typeof location !== 'string' ||
+    !location.trim() ||
+    location.trim().length > 255
+  ) {
+    return res
+      .status(400)
+      .json({ message: 'Location is required and must be 255 characters or fewer' });
+  }
+  if (
+    typeof description !== 'string' ||
+    !description.trim() ||
+    description.trim().length > 5000
+  ) {
+    return res.status(400).json({
+      message: 'Description is required and must be 5000 characters or fewer',
+    });
+  }
+  if (
+    !isCoordinate(latitude, -90, 90) ||
+    !isCoordinate(longitude, -180, 180)
+  ) {
+    return res.status(400).json({ message: 'Coordinates are invalid' });
+  }
+
+  let client;
   try {
-    const { type, location, latitude, longitude, description } = req.body;
+    client = await pool.connect();
+    await client.query('BEGIN');
 
-    if (!type || !location || !description) {
-      return res
-        .status(400)
-        .json({ message: 'Type, location and description are required' });
-    }
-
-    const result = await pool.query(
+    const result = await client.query(
       `INSERT INTO incidents (citizen_id, type, location, latitude, longitude, description)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [req.user.id, type, location, latitude || null, longitude || null, description]
+      [
+        req.user.id,
+        type,
+        location.trim(),
+        latitude ?? null,
+        longitude ?? null,
+        description.trim(),
+      ]
     );
     const incident = result.rows[0];
 
-    await logUpdate(pool, incident.id, 'Reported', 'Emergency reported', req.user.id);
+    await logUpdate(
+      client,
+      incident.id,
+      'Reported',
+      'Emergency reported',
+      req.user.id
+    );
+    await notifyDispatchers(
+      client,
+      incident,
+      'incident_reported',
+      `New ${incident.type} incident #${incident.id} reported`
+    );
+    await client.query('COMMIT');
 
     res.status(201).json({ message: 'Emergency reported', incident });
   } catch (err) {
+    if (client) await rollback(client);
     console.error(err);
     res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
   }
 };
 
@@ -75,6 +187,13 @@ exports.getIncidents = async (req, res) => {
     const { status } = req.query;
     const conditions = [];
     const values = [];
+
+    if (
+      status &&
+      (typeof status !== 'string' || !INCIDENT_STATUSES.includes(status))
+    ) {
+      return res.status(400).json({ message: 'Invalid incident status' });
+    }
 
     if (role === 'citizen') {
       values.push(id);
@@ -145,22 +264,33 @@ exports.getIncidentHistory = async (req, res) => {
 // PATCH /api/incidents/:id/verify  (dispatcher)
 // Body: { "valid": true, "note": "Confirmed by phone call" }
 exports.verifyIncident = async (req, res) => {
+  const { valid, note } = req.body || {};
+
+  if (typeof valid !== 'boolean') {
+    return res.status(400).json({ message: '"valid" must be true or false' });
+  }
+  if (!isOptionalText(note, 1000)) {
+    return res
+      .status(400)
+      .json({ message: 'Note must be 1000 characters or fewer' });
+  }
+
+  let client;
   try {
-    const { valid, note } = req.body;
-
-    if (typeof valid !== 'boolean') {
-      return res.status(400).json({ message: '"valid" must be true or false' });
-    }
-
-    const found = await pool.query('SELECT * FROM incidents WHERE id = $1', [
-      req.params.id,
-    ]);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const found = await client.query(
+      'SELECT * FROM incidents WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    );
     const incident = found.rows[0];
 
     if (!incident) {
+      await rollback(client);
       return res.status(404).json({ message: 'Incident not found' });
     }
     if (incident.status !== 'Reported') {
+      await rollback(client);
       return res
         .status(400)
         .json({ message: 'Only reported incidents can be verified or rejected' });
@@ -168,7 +298,7 @@ exports.verifyIncident = async (req, res) => {
 
     const newStatus = valid ? 'Verified' : 'Rejected';
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE incidents
        SET status = $1, dispatcher_id = $2, updated_at = NOW()
        WHERE id = $3 RETURNING *`,
@@ -176,29 +306,48 @@ exports.verifyIncident = async (req, res) => {
     );
 
     await logUpdate(
-      pool, incident.id, newStatus,
-      note || (valid ? 'Incident verified' : 'Report rejected'),
+      client,
+      incident.id,
+      newStatus,
+      note?.trim() || (valid ? 'Incident verified' : 'Report rejected'),
       req.user.id
     );
+    await createNotification(
+      client,
+      incident.citizen_id,
+      incident.id,
+      valid ? 'incident_verified' : 'incident_rejected',
+      `Incident #${incident.id} was ${valid ? 'verified' : 'rejected'}`
+    );
 
-    res.json({ message: `Incident ${newStatus.toLowerCase()}`, incident: result.rows[0] });
+    await client.query('COMMIT');
+    res.json({
+      message: `Incident ${newStatus.toLowerCase()}`,
+      incident: result.rows[0],
+    });
   } catch (err) {
+    if (client) await rollback(client);
     console.error(err);
     res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
   }
 };
 
 // PATCH /api/incidents/:id/assign  (dispatcher)
 // Body: { "responder_id": 1 }
 exports.assignResponder = async (req, res) => {
-  const { responder_id } = req.body;
+  const { responder_id } = req.body || {};
 
-  if (!responder_id) {
-    return res.status(400).json({ message: 'responder_id is required' });
+  if (!Number.isSafeInteger(responder_id) || responder_id < 1) {
+    return res
+      .status(400)
+      .json({ message: 'responder_id must be a positive integer' });
   }
 
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
 
     // FOR UPDATE locks the rows so two dispatchers cannot assign the same responder
@@ -209,11 +358,11 @@ exports.assignResponder = async (req, res) => {
     const incident = incResult.rows[0];
 
     if (!incident) {
-      await client.query('ROLLBACK');
+      await rollback(client);
       return res.status(404).json({ message: 'Incident not found' });
     }
     if (incident.status !== 'Verified') {
-      await client.query('ROLLBACK');
+      await rollback(client);
       return res
         .status(400)
         .json({ message: 'Only verified incidents can be assigned' });
@@ -226,11 +375,17 @@ exports.assignResponder = async (req, res) => {
     const responder = respResult.rows[0];
 
     if (!responder) {
-      await client.query('ROLLBACK');
+      await rollback(client);
       return res.status(404).json({ message: 'Responder not found' });
     }
+    if (!RESPONDER_TYPES_BY_INCIDENT[incident.type]?.includes(responder.responder_type)) {
+      await rollback(client);
+      return res.status(400).json({
+        message: `This responder cannot be assigned to ${incident.type} incidents`,
+      });
+    }
     if (responder.status !== 'available') {
-      await client.query('ROLLBACK');
+      await rollback(client);
       return res.status(400).json({ message: 'This responder is not available' });
     }
 
@@ -243,26 +398,56 @@ exports.assignResponder = async (req, res) => {
     await client.query("UPDATE responders SET status = 'busy' WHERE id = $1", [
       responder.id,
     ]);
-    await logUpdate(client, incident.id, 'Assigned', 'Responder assigned', req.user.id);
+    await logUpdate(
+      client,
+      incident.id,
+      'Assigned',
+      'Responder assigned',
+      req.user.id
+    );
+    await createNotification(
+      client,
+      responder.user_id,
+      incident.id,
+      'incident_assigned',
+      `Incident #${incident.id} has been assigned to you`
+    );
+    await createNotification(
+      client,
+      incident.citizen_id,
+      incident.id,
+      'incident_assigned',
+      `A responder has been assigned to incident #${incident.id}`
+    );
 
     await client.query('COMMIT');
     res.json({ message: 'Responder assigned', incident: updated.rows[0] });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) await rollback(client);
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 };
 
 // PATCH /api/incidents/:id/status  (responder)
 // Body: { "status": "In Progress", "note": "Arrived at the scene" }
 exports.updateStatus = async (req, res) => {
-  const { status, note } = req.body;
+  const { status, note } = req.body || {};
 
-  const client = await pool.connect();
+  if (typeof status !== 'string') {
+    return res.status(400).json({ message: 'Status must be text' });
+  }
+  if (!isOptionalText(note, 1000)) {
+    return res
+      .status(400)
+      .json({ message: 'Note must be 1000 characters or fewer' });
+  }
+
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
 
     // Only the responder assigned to this incident can update it
@@ -277,7 +462,7 @@ exports.updateStatus = async (req, res) => {
     const incident = result.rows[0];
 
     if (!incident) {
-      await client.query('ROLLBACK');
+      await rollback(client);
       return res
         .status(404)
         .json({ message: 'Incident not found or not assigned to you' });
@@ -285,7 +470,7 @@ exports.updateStatus = async (req, res) => {
 
     const allowedNext = ALLOWED_TRANSITIONS[incident.status] || [];
     if (!allowedNext.includes(status)) {
-      await client.query('ROLLBACK');
+      await rollback(client);
       return res.status(400).json({
         message: `Cannot change status from "${incident.status}" to "${status}"`,
       });
@@ -304,50 +489,90 @@ exports.updateStatus = async (req, res) => {
     }
 
     await logUpdate(
-      client, incident.id, status, note || `Status changed to ${status}`, req.user.id
+      client,
+      incident.id,
+      status,
+      note?.trim() || `Status changed to ${status}`,
+      req.user.id
+    );
+    await createNotification(
+      client,
+      incident.citizen_id,
+      incident.id,
+      'incident_status',
+      `Incident #${incident.id} status changed to ${status}`
     );
 
     await client.query('COMMIT');
     res.json({ message: 'Status updated', incident: updated.rows[0] });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) await rollback(client);
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 };
 
 // PATCH /api/incidents/:id/close  (dispatcher)
 // Body (optional): { "note": "All finished" }
 exports.closeIncident = async (req, res) => {
+  const { note } = req.body || {};
+
+  if (!isOptionalText(note, 1000)) {
+    return res
+      .status(400)
+      .json({ message: 'Note must be 1000 characters or fewer' });
+  }
+
+  let client;
   try {
-    const found = await pool.query('SELECT * FROM incidents WHERE id = $1', [
-      req.params.id,
-    ]);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const found = await client.query(
+      'SELECT * FROM incidents WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    );
     const incident = found.rows[0];
 
     if (!incident) {
+      await rollback(client);
       return res.status(404).json({ message: 'Incident not found' });
     }
     if (incident.status !== 'Completed') {
+      await rollback(client);
       return res
         .status(400)
         .json({ message: 'Only completed incidents can be closed' });
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE incidents SET status = 'Closed', updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [incident.id]
     );
     await logUpdate(
-      pool, incident.id, 'Closed', req.body.note || 'Incident closed', req.user.id
+      client,
+      incident.id,
+      'Closed',
+      note?.trim() || 'Incident closed',
+      req.user.id
+    );
+    await createNotification(
+      client,
+      incident.citizen_id,
+      incident.id,
+      'incident_closed',
+      `Incident #${incident.id} has been closed`
     );
 
+    await client.query('COMMIT');
     res.json({ message: 'Incident closed', incident: result.rows[0] });
   } catch (err) {
+    if (client) await rollback(client);
     console.error(err);
     res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
   }
 };
