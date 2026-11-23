@@ -2,16 +2,38 @@
 const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
 
+const isValidEmail = (email) =>
+  email.length <= 150 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const isOptionalText = (value, maxLength) =>
+  value == null ||
+  (typeof value === 'string' && value.trim().length <= maxLength);
+
+const rollback = async (client) => {
+  try {
+    await client.query('ROLLBACK');
+  } catch (err) {
+    console.error('Could not roll back transaction:', err);
+  }
+};
+
 // POST /api/users  (admin only)
 // Creates a dispatcher, responder or another admin.
 exports.createUser = async (req, res) => {
   const {
     name, email, phone, address, password, role,
     responder_type, unit, badge_number, license_number, station,
-  } = req.body;
+  } = req.body || {};
 
-  // ---- validation first ----
-  if (!name || !email || !password || !role) {
+  if (
+    typeof name !== 'string' ||
+    typeof email !== 'string' ||
+    typeof password !== 'string' ||
+    !name.trim() ||
+    !email.trim() ||
+    !password ||
+    !role
+  ) {
     return res
       .status(400)
       .json({ message: 'Name, email, password and role are required' });
@@ -21,38 +43,69 @@ exports.createUser = async (req, res) => {
       .status(400)
       .json({ message: 'Role must be dispatcher, responder or admin' });
   }
-  if (password.length < 6) {
+  if (name.trim().length > 100) {
     return res
       .status(400)
-      .json({ message: 'Password must be at least 6 characters' });
+      .json({ message: 'Name must be 100 characters or fewer' });
   }
-  if (role === 'responder' && !['police', 'medical', 'fire'].includes(responder_type)) {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!isValidEmail(cleanEmail)) {
     return res
       .status(400)
-      .json({ message: 'responder_type must be police, medical or fire' });
+      .json({ message: 'Please provide a valid email address' });
+  }
+  if (password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
+    return res
+      .status(400)
+      .json({ message: 'Password must be 6-72 bytes long' });
+  }
+  if (
+    !isOptionalText(phone, 20) ||
+    !isOptionalText(address, 255) ||
+    !isOptionalText(unit, 100) ||
+    !isOptionalText(badge_number, 50) ||
+    !isOptionalText(license_number, 50) ||
+    !isOptionalText(station, 100)
+  ) {
+    return res
+      .status(400)
+      .json({ message: 'A supplied user field is invalid or too long' });
+  }
+  if (
+    role === 'responder' &&
+    !['police', 'medical', 'fire', 'other'].includes(responder_type)
+  ) {
+    return res
+      .status(400)
+      .json({ message: 'responder_type must be police, medical, fire or other' });
   }
 
-  const client = await pool.connect();
+  let client;
   try {
-    const cleanEmail = email.trim().toLowerCase();
+    const passwordHash = await bcrypt.hash(password, 10);
+    client = await pool.connect();
+    await client.query('BEGIN');
 
     const existing = await client.query('SELECT id FROM users WHERE email = $1', [
       cleanEmail,
     ]);
     if (existing.rows.length > 0) {
+      await rollback(client);
       return res.status(409).json({ message: 'Email is already registered' });
     }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    // A transaction = both inserts succeed together, or none of them do
-    await client.query('BEGIN');
 
     const userResult = await client.query(
       `INSERT INTO users (name, email, phone, address, password_hash, role)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, name, email, role`,
-      [name, cleanEmail, phone || null, address || null, passwordHash, role]
+      [
+        name.trim(),
+        cleanEmail,
+        phone?.trim() || null,
+        address?.trim() || null,
+        passwordHash,
+        role,
+      ]
     );
     const user = userResult.rows[0];
 
@@ -61,19 +114,28 @@ exports.createUser = async (req, res) => {
         `INSERT INTO responders
            (user_id, responder_type, unit, badge_number, license_number, station)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [user.id, responder_type, unit || null, badge_number || null,
-         license_number || null, station || null]
+        [
+          user.id,
+          responder_type,
+          unit?.trim() || null,
+          badge_number?.trim() || null,
+          license_number?.trim() || null,
+          station?.trim() || null,
+        ]
       );
     }
 
     await client.query('COMMIT');
     res.status(201).json({ message: 'User created', user });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) await rollback(client);
+    if (err.code === '23505') {
+      return res.status(409).json({ message: 'Email is already registered' });
+    }
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 };
 
@@ -94,12 +156,15 @@ exports.getUsers = async (req, res) => {
 // DELETE /api/users/:id  (admin only)
 exports.deleteUser = async (req, res) => {
   try {
-    if (Number(req.params.id) === req.user.id) {
-      return res.status(400).json({ message: 'You cannot delete your own account' });
+    const userId = Number(req.params.id);
+    if (userId === Number(req.user.id)) {
+      return res
+        .status(400)
+        .json({ message: 'You cannot delete your own account' });
     }
 
     const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [
-      req.params.id,
+      userId,
     ]);
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
@@ -123,6 +188,21 @@ exports.getResponders = async (req, res) => {
     const { type, status } = req.query;
     const conditions = [];
     const values = [];
+
+    if (
+      type &&
+      (typeof type !== 'string' ||
+        !['police', 'medical', 'fire', 'other'].includes(type))
+    ) {
+      return res.status(400).json({ message: 'Invalid responder type' });
+    }
+    if (
+      status &&
+      (typeof status !== 'string' ||
+        !['available', 'busy', 'offline'].includes(status))
+    ) {
+      return res.status(400).json({ message: 'Invalid responder status' });
+    }
 
     if (type) {
       values.push(type);

@@ -7,7 +7,8 @@ const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
 // :id must be a number
 router.param('id', (req, res, next, value) => {
-  if (!/^\d+$/.test(value)) {
+  const id = Number(value);
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(id) || id > 2147483647) {
     return res.status(400).json({ message: 'Invalid id' });
   }
   next();
