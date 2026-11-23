@@ -25,7 +25,7 @@ CREATE TABLE responders (
     id             SERIAL PRIMARY KEY,
     user_id        INT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     responder_type VARCHAR(20) NOT NULL
-                   CHECK (responder_type IN ('police', 'medical', 'fire')),
+                   CHECK (responder_type IN ('police', 'medical', 'fire', 'other')),
     unit           VARCHAR(100),
     badge_number   VARCHAR(50),   -- police
     license_number VARCHAR(50),   -- medical
@@ -62,6 +62,19 @@ CREATE TABLE incident_updates (
     created_at  TIMESTAMP DEFAULT NOW()
 );
 
+-- 5. NOTIFICATIONS: in-app messages scoped to each recipient
+CREATE TABLE notifications (
+    id          SERIAL PRIMARY KEY,
+    user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    incident_id INT REFERENCES incidents(id) ON DELETE SET NULL,
+    type        VARCHAR(50) NOT NULL,
+    message     VARCHAR(255) NOT NULL,
+    read_at     TIMESTAMP,
+    created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 -- Indexes make searching faster
 CREATE INDEX idx_incidents_status  ON incidents(status);
 CREATE INDEX idx_incidents_citizen ON incidents(citizen_id);
+CREATE INDEX idx_notifications_user_unread ON notifications(user_id, created_at DESC)
+    WHERE read_at IS NULL;
