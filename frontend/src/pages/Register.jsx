@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 function Register() {
   const { user, register } = useAuth();
+  const { t } = useLanguage();
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -31,7 +33,7 @@ function Register() {
     setError('');
 
     if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match');
+      setError(t('passwordsDoNotMatch'));
       return;
     }
 
@@ -45,7 +47,7 @@ function Register() {
         password: form.password,
       });
     } catch (err) {
-      setError(err.response?.data?.message || 'Cannot reach the server');
+      setError(err.response?.data?.message || t('cannotReach'));
       setLoading(false);
     }
   };
@@ -53,13 +55,13 @@ function Register() {
   return (
     <div className="container" style={{ maxWidth: 420 }}>
       <div className="card">
-        <h2>Create a citizen account</h2>
+        <h2>{t('createCitizenAccount')}</h2>
 
         <form onSubmit={handleSubmit}>
-          <label>Full name</label>
+          <label>{t('fullName')}</label>
           <input name="name" value={form.name} onChange={handleChange} required />
 
-          <label>Email</label>
+          <label>{t('email')}</label>
           <input
             type="email"
             name="email"
@@ -68,7 +70,7 @@ function Register() {
             required
           />
 
-          <label>Phone</label>
+          <label>{t('phone')}</label>
           <input
             name="phone"
             value={form.phone}
@@ -76,10 +78,10 @@ function Register() {
             placeholder="07..."
           />
 
-          <label>Address</label>
+          <label>{t('address')}</label>
           <input name="address" value={form.address} onChange={handleChange} />
 
-          <label>Password (at least 6 characters)</label>
+          <label>{t('password')} (6-72 bytes)</label>
           <input
             type="password"
             name="password"
@@ -88,7 +90,7 @@ function Register() {
             required
           />
 
-          <label>Confirm password</label>
+          <label>{t('confirmPassword')}</label>
           <input
             type="password"
             name="confirmPassword"
@@ -100,12 +102,12 @@ function Register() {
           {error && <p className="error">{error}</p>}
 
           <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? 'Please wait...' : 'Register'}
+            {loading ? t('pleaseWait') : t('register')}
           </button>
         </form>
 
         <p>
-          Already have an account? <Link to="/login">Login</Link>
+          {t('haveAccount')} <Link to="/login">{t('login')}</Link>
         </p>
       </div>
     </div>

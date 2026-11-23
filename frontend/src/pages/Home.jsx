@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '../services/api';
+import { useLanguage } from '../context/LanguageContext';
 
 function Home() {
+  const { t } = useLanguage();
   const [status, setStatus] = useState('checking');
 
   useEffect(() => {
@@ -19,13 +21,13 @@ function Home() {
         <h1>RERCS</h1>
         <p>Rwanda Emergency Response and Coordination System</p>
 
-        {status === 'checking' && <p>Checking the server...</p>}
+        {status === 'checking' && <p>{t('checkingServer')}</p>}
         {status === 'connected' && (
-          <p className="ok">✅ Frontend is connected to the backend</p>
+          <p className="ok">✅ {t('serverConnected')}</p>
         )}
         {status === 'error' && (
           <p className="fail">
-            ❌ Cannot reach the backend. Is it running on {API_URL}?
+            ❌ {t('cannotReachServer')} {API_URL}?
           </p>
         )}
       </div>

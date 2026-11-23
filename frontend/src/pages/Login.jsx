@@ -2,11 +2,14 @@
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 function Login() {
   const { user, login } = useAuth();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -23,7 +26,7 @@ function Login() {
     try {
       await login(email, password);
     } catch (err) {
-      setError(err.response?.data?.message || 'Cannot reach the server');
+      setError(err.response?.data?.message || t('cannotReach'));
       setLoading(false);
     }
   };
@@ -31,35 +34,49 @@ function Login() {
   return (
     <div className="container" style={{ maxWidth: 420 }}>
       <div className="card">
-        <h2>Login</h2>
+        <h2>{t('login')}</h2>
 
         <form onSubmit={handleSubmit}>
-          <label>Email</label>
+          <label>{t('email')}</label>
           <input
-            type="email"
+            type="text"
+            autoComplete="username"
+            inputMode="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
             required
           />
 
-          <label>Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <label>{t('password')}</label>
+          <div className="password-input">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <button
+              className="password-toggle"
+              type="button"
+              aria-label={showPassword ? t('hide') : t('show')}
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword((visible) => !visible)}
+            >
+              {showPassword ? t('hide') : t('show')}
+            </button>
+          </div>
 
           {error && <p className="error">{error}</p>}
 
           <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? 'Please wait...' : 'Login'}
+            {loading ? t('pleaseWait') : t('login')}
           </button>
         </form>
 
         <p>
-          New citizen? <Link to="/register">Create an account</Link>
+          {t('newCitizen')} <Link to="/register">{t('createAccount')}</Link>
         </p>
       </div>
     </div>
